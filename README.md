@@ -6,4 +6,3 @@ Playing with waveform function collapse for level generation.
 
 ## TODO
 - Generate more sane levels.
-- 
