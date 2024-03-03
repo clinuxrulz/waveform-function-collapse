@@ -237,7 +237,14 @@ fn generate_model_analyze_image_startup(
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut next_state: ResMut<NextState<PluginState>>,
     mut commands: Commands,
+    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
+    let mut window_width: f32 = 0.0;
+    let mut window_height: f32 = 0.0;
+    for window in &windows {
+        window_width = window.width();
+        window_height = window.height();
+    }
     info!("Analyzing image.");
     let Some(image) = images.get(&gen_model_state.image) else {
         return;
@@ -334,22 +341,26 @@ fn generate_model_analyze_image_startup(
             let at_tile_id = map[i][j];
             waveform_function.inc_count_for_tile(at_tile_id);
             if j > 0 {
-                waveform_function.accum_weight(at_tile_id, Side::Left, map[i][j - 1]);
+                waveform_function.accum_weight(at_tile_id, (-1, 0), map[i][j - 1], false);
             }
             if j < row.len() - 1 {
-                waveform_function.accum_weight(at_tile_id, Side::Right, map[i][j + 1]);
+                waveform_function.accum_weight(at_tile_id, (1, 0), map[i][j + 1], false);
             }
             if i > 0 {
-                waveform_function.accum_weight(at_tile_id, Side::Up, map[i - 1][j]);
+                waveform_function.accum_weight(at_tile_id, (0, -1), map[i - 1][j], false);
             }
             if i < map.len() - 1 {
-                waveform_function.accum_weight(at_tile_id, Side::Down, map[i + 1][j]);
+                waveform_function.accum_weight(at_tile_id, (0, 1), map[i + 1][j], false);
             }
         }
     }
     info!("{map:?}");
     let map_generator =
-        MapGenerator::new(waveform_function, 40, 80).with_assigned_tile(0, 20, TileId(20));
+        MapGenerator::new(
+            waveform_function,
+            if window_width < window_height { 40 } else { 80 },
+            if window_width < window_height { 20 } else { 40 },
+        );//.with_assigned_tile(0, 20, TileId(20));
     commands.insert_resource(GenerateModelMapState {
         map,
         num_rows,
