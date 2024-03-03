@@ -358,8 +358,8 @@ fn generate_model_analyze_image_startup(
     let map_generator =
         MapGenerator::new(
             waveform_function,
-            if window_width < window_height { 40 } else { 80 },
-            if window_width < window_height { 20 } else { 40 },
+            if window_width < window_height { 40 } else { 40 },
+            if window_width < window_height { 20 } else { 80 },
         );//.with_assigned_tile(0, 20, TileId(20));
     commands.insert_resource(GenerateModelMapState {
         map,
