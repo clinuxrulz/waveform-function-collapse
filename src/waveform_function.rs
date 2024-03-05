@@ -162,7 +162,7 @@ impl MapStates {
     }
 
     fn assign_tile(&mut self, x: usize, y: usize, tile_id: TileId) {
-        self.states[y][x] = TinyBitSet::new().assigned(tile_id.0, true);
+        self.states[y][x] = TinyBitSet::new().assigned(tile_id.0.min(64*2-1), true);
     }
 
     fn assign_random(&mut self, waveform_function: &WaveformFunction, x: usize, y: usize) {
@@ -183,7 +183,7 @@ impl MapStates {
         for &(tile_id, weight) in &possible_tiles {
             let weight = apply_caos(*waveform_function.counts.get(&tile_id).unwrap() as f32);
             if weight >= random {
-                self.states[y][x] = TinyBitSet::new().assigned(tile_id.0, true);
+                self.states[y][x] = TinyBitSet::new().assigned(tile_id.0.min(64*2-1), true);
                 break;
             }
             random -= weight;
@@ -283,7 +283,9 @@ impl MapStates {
         let mut new_bitset = self.states[y][x];
         let mut mask = TinyBitSet::<u64,2>::new();
         for (tile_id, _) in self.possible_tiles_weighted(waveform_function, x, y) {
+            if (tile_id.0 < 64*2) {
             mask.insert(tile_id.0);
+            }
         }
         new_bitset &= mask;
         let changed = self.states[y][x] != new_bitset;

@@ -1,10 +1,5 @@
-use bevy::prelude::*;
-
-mod gen_level_plugin;
-pub mod waveform_function;
+use waveform_function_collapse_lib::real_main;
 
 fn main() {
-    App::new()
-        .add_plugins((DefaultPlugins, gen_level_plugin::GenLevelPlugin))
-        .run();
+    real_main();
 }

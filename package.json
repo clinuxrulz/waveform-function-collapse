@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "start": "http-server ./pkg",
+    "build": "wasm-pack build --target=web"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

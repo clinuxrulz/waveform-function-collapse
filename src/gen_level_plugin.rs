@@ -108,11 +108,12 @@ impl Plugin for GenLevelPlugin {
 
 const GEN_MODEL_TILE_SIZE: usize = 16;
 
-const GEN_MODEL_FROM_FILENAMES: [&str; 4] = [
+const GEN_MODEL_FROM_FILENAMES: [&str; 5] = [
     "super-mario-bros-3-1-1-bg.png",
     "super-mario-bros-3-1-2-bg.png",
     "super-mario-bros-3-1-3-bg.png",
     "super-mario-bros-3-1-5-bg.png",
+    "airship.png",
 ];
 
 const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
@@ -245,6 +246,7 @@ fn generate_model_analyze_image_startup(
         window_width = window.width();
         window_height = window.height();
     }
+    info!("window {window_width}x{window_height}");
     info!("Analyzing image.");
     let Some(image) = images.get(&gen_model_state.image) else {
         return;
@@ -358,8 +360,8 @@ fn generate_model_analyze_image_startup(
     let map_generator =
         MapGenerator::new(
             waveform_function,
-            if window_width < window_height { 40 } else { 40 },
-            if window_width < window_height { 20 } else { 80 },
+            (window_height as usize) / GEN_MODEL_TILE_SIZE,
+            (window_width as usize) / GEN_MODEL_TILE_SIZE,
         );//.with_assigned_tile(0, 20, TileId(20));
     commands.insert_resource(GenerateModelMapState {
         map,
