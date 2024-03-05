@@ -1,4 +1,4 @@
-use crate::waveform_function::{MapGenerator, Side, TileId, WaveformFunction};
+use crate::waveform_function::{MapGenerator, TileId, WaveformFunction};
 use bevy::{
     asset::LoadState,
     prelude::*,
@@ -335,7 +335,6 @@ fn generate_model_analyze_image_startup(
         offset_1 += GEN_MODEL_TILE_SIZE * (image_width as usize) * 4;
         pixel_location_y += GEN_MODEL_TILE_SIZE;
     }
-    info!("{map:?}");
     let mut waveform_function = WaveformFunction::new();
     for i in 0..map.len() {
         let row = &map[i];
@@ -343,16 +342,16 @@ fn generate_model_analyze_image_startup(
             let at_tile_id = map[i][j];
             waveform_function.inc_count_for_tile(at_tile_id);
             if j > 0 {
-                waveform_function.accum_weight(at_tile_id, (-1, 0), map[i][j - 1], false);
+                waveform_function.accum_weight(at_tile_id, &[((-1, 0), map[i][j - 1])]);
             }
             if j < row.len() - 1 {
-                waveform_function.accum_weight(at_tile_id, (1, 0), map[i][j + 1], false);
+                waveform_function.accum_weight(at_tile_id, &[((1, 0), map[i][j + 1])]);
             }
             if i > 0 {
-                waveform_function.accum_weight(at_tile_id, (0, -1), map[i - 1][j], false);
+                waveform_function.accum_weight(at_tile_id, &[((0, -1), map[i - 1][j])]);
             }
             if i < map.len() - 1 {
-                waveform_function.accum_weight(at_tile_id, (0, 1), map[i + 1][j], false);
+                waveform_function.accum_weight(at_tile_id, &[((0, 1), map[i + 1][j])]);
             }
         }
     }
@@ -369,7 +368,7 @@ fn generate_model_analyze_image_startup(
         num_cols,
         tile_hash_tile_id_map,
         tile_id_tile_map,
-        seed: 0,
+        seed: 1,
         map_generator,
         num_tile_types: next_id,
     });
