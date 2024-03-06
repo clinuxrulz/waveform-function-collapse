@@ -335,33 +335,55 @@ fn generate_model_analyze_image_startup(
         offset_1 += GEN_MODEL_TILE_SIZE * (image_width as usize) * 4;
         pixel_location_y += GEN_MODEL_TILE_SIZE;
     }
-    let mut waveform_function = WaveformFunction::new();
+    /*
+    let mut waveform_function_1 = WaveformFunction::new();
     for i in 0..map.len() {
         let row = &map[i];
         for j in 0..row.len() {
             let at_tile_id = map[i][j];
-            waveform_function.inc_count_for_tile(at_tile_id);
+            waveform_function_1.inc_count_for_tile(at_tile_id);
+            if j > 1 {
+                waveform_function_1.accum_weight(at_tile_id, &[((-1, 0), map[i][j - 1]), ((-2, 0), map[i][j - 2])]);
+            }
+            if j < row.len() - 2 {
+                waveform_function_1.accum_weight(at_tile_id, &[((1, 0), map[i][j + 1]), ((2, 0), map[i][j + 2])]);
+            }
+            if i > 1 {
+                waveform_function_1.accum_weight(at_tile_id, &[((0, -1), map[i - 1][j]), ((0, -2), map[i - 2][j])]);
+            }
+            if i < map.len() - 2 {
+                waveform_function_1.accum_weight(at_tile_id, &[((0, 1), map[i + 1][j]), ((0, 2), map[i + 2][j])]);
+            }
+        }
+    }
+    */
+    let mut waveform_function_2 = WaveformFunction::new();
+    for i in 0..map.len() {
+        let row = &map[i];
+        for j in 0..row.len() {
+            let at_tile_id = map[i][j];
+            waveform_function_2.inc_count_for_tile(at_tile_id);
             if j > 0 {
-                waveform_function.accum_weight(at_tile_id, &[((-1, 0), map[i][j - 1])]);
+                waveform_function_2.accum_weight(at_tile_id, &[((-1, 0), map[i][j - 1])]);
             }
             if j < row.len() - 1 {
-                waveform_function.accum_weight(at_tile_id, &[((1, 0), map[i][j + 1])]);
+                waveform_function_2.accum_weight(at_tile_id, &[((1, 0), map[i][j + 1])]);
             }
             if i > 0 {
-                waveform_function.accum_weight(at_tile_id, &[((0, -1), map[i - 1][j])]);
+                waveform_function_2.accum_weight(at_tile_id, &[((0, -1), map[i - 1][j])]);
             }
             if i < map.len() - 1 {
-                waveform_function.accum_weight(at_tile_id, &[((0, 1), map[i + 1][j])]);
+                waveform_function_2.accum_weight(at_tile_id, &[((0, 1), map[i + 1][j])]);
             }
         }
     }
     info!("{map:?}");
     let map_generator =
         MapGenerator::new(
-            waveform_function,
+            vec![/*waveform_function_1,*/waveform_function_2],
             (window_height as usize) / GEN_MODEL_TILE_SIZE,
             (window_width as usize) / GEN_MODEL_TILE_SIZE,
-        );//.with_assigned_tile(0, 20, TileId(20));
+        ).with_assigned_random_tiles_from_original_map(&map, 10);
     commands.insert_resource(GenerateModelMapState {
         map,
         num_rows,
@@ -398,11 +420,8 @@ fn generate_model_generate_map(
         info!("seed = {seed}");
         generate_model_map_state.seed += 1;
         generate_model_map_state.map_generator.reset(seed);
-        for _i in 0..2 {
-            generate_model_map_state
-                .map_generator
-                .assign_random_tile_at_random_spot();
-        }
+        let generate_model_map_state = &mut *generate_model_map_state;
+        generate_model_map_state.map_generator.assign_random_tiles_from_original_map(&generate_model_map_state.map, 10);
     };
     let mut next_level = || {
         next_state.set(PluginState::NextLevel);

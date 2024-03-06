@@ -23,7 +23,8 @@ pub struct WaveformFunction {
     num_unique_tiles: usize,
     counts: HashMap<TileId, usize>,
     rules: Vec<Rule>,
-    rule_offsets: HashSet<SmallVec<[(i8,i8);8]>>,
+    rule_offsets: HashSet<(i8,i8)>,
+    tile_rules_map: HashMap<TileId,Vec<Rule>>,
 }
 
 impl Default for WaveformFunction {
@@ -40,6 +41,7 @@ impl WaveformFunction {
             counts: HashMap::new(),
             rules: Vec::new(),
             rule_offsets: HashSet::new(),
+            tile_rules_map: HashMap::new(),
         }
     }
 
@@ -63,24 +65,42 @@ impl WaveformFunction {
 
     pub fn accum_weight(&mut self, tile_id: TileId, neighbours: &[((i8,i8), TileId)]) {
         let mut neighbours2 = SmallVec::<[Neighbour; 8]>::new();
-        let mut offsets = SmallVec::<[(i8,i8); 8]>::new();
         for &neighbour in neighbours {
             let neighbour = Neighbour {
                 offset: neighbour.0,
                 neighbour: neighbour.1,
             };
             neighbours2.push(neighbour);
-            offsets.push(neighbour.offset);
+            self.rule_offsets.insert(neighbour.offset);
         }
-        self.rule_offsets.insert(offsets);
         if let Some(x) = self.rules.iter_mut().find(|rule| rule.neighbours == neighbours2 && rule.result == tile_id) {
             x.weight += 1.0;
         } else {
             self.rules.push(Rule {
-                neighbours: neighbours2,
+                neighbours: neighbours2.clone(),
                 result: tile_id,
                 weight: 1.0,
             });
+        }
+        if let Some(rules) = self.tile_rules_map.get_mut(&tile_id) {
+            if let Some(x) = rules.iter_mut().find(|rule| rule.neighbours == neighbours2 && rule.result == tile_id) {
+                x.weight += 1.0;
+            } else {
+                rules.push(Rule {
+                    neighbours: neighbours2,
+                    result: tile_id,
+                    weight: 1.0,
+                });
+            }
+        } else {
+            self.tile_rules_map.insert(
+                tile_id,
+                vec![Rule {
+                    neighbours: neighbours2,
+                    result: tile_id,
+                    weight: 1.0,
+                }]
+            );
         }
     }
 }
@@ -190,41 +210,47 @@ impl MapStates {
     ) -> SmallVec<[(TileId, f32); 128]> {
         let mut neighbour_offsets = SmallVec::<[(i8,i8); 8]>::new();
         let mut result = SmallVec::<[(SmallVec<[(i8,i8);8]>,SmallVec::<[(TileId, f32); 128]>); 8]>::new();
-        for rule in &waveform_function.rules {
-            neighbour_offsets.clear();
-            let mut neighbours_match = true;
-            for neighbour in &rule.neighbours {
-                neighbour_offsets.push(neighbour.offset);
-                let neighbour_x = (x as i32) + (neighbour.offset.0 as i32);
-                if neighbour_x < 0 || neighbour_x >= self.cols as i32 {
-                    neighbours_match = false;
-                    break;
+        for tile_id in &self.states[y][x] {
+            let tile_id = TileId(tile_id);
+            let Some(rules) = waveform_function.tile_rules_map.get(&tile_id) else { continue; };
+            for rule in rules {
+                neighbour_offsets.clear();
+                let mut neighbours_match = true;
+                for neighbour in &rule.neighbours {
+                    neighbour_offsets.push(neighbour.offset);
+                    let neighbour_x = (x as i32) + (neighbour.offset.0 as i32);
+                    if neighbour_x < 0 || neighbour_x >= self.cols as i32 {
+                        //neighbours_match = false;
+                        //break;
+                        continue;
+                    }
+                    let neighbour_x = neighbour_x as usize;
+                    let neighbour_y = (y as i32) + (neighbour.offset.1 as i32);
+                    if neighbour_y < 0 || neighbour_y >= self.rows as i32 {
+                        //neighbours_match = false;
+                        //break;
+                        continue;
+                    }
+                    let neighbour_y = neighbour_y as usize;
+                    if !self.states[neighbour_y][neighbour_x].iter().any(|tile_id| tile_id == neighbour.neighbour.0) {
+                        neighbours_match = false;
+                        break;
+                    }
                 }
-                let neighbour_x = neighbour_x as usize;
-                let neighbour_y = (y as i32) + (neighbour.offset.1 as i32);
-                if neighbour_y < 0 || neighbour_y >= self.rows as i32 {
-                    neighbours_match = false;
-                    break;
+                if !neighbours_match {
+                    continue;
                 }
-                let neighbour_y = neighbour_y as usize;
-                if !self.states[neighbour_y][neighbour_x].iter().any(|tile_id| tile_id == neighbour.neighbour.0) {
-                    neighbours_match = false;
-                    break;
-                }
-            }
-            if !neighbours_match {
-                continue;
-            }
-            if let Some((_, x)) = result.iter_mut().find(|(offsets, _)| *offsets == neighbour_offsets) {
-                if let Some((_, weight)) = x.iter_mut().find(|(tile_id, _)| *tile_id == rule.result) {
-                    *weight += rule.weight;
+                if let Some((_, x)) = result.iter_mut().find(|(offsets, _)| *offsets == neighbour_offsets) {
+                    if let Some((_, weight)) = x.iter_mut().find(|(tile_id, _)| *tile_id == rule.result) {
+                        *weight += rule.weight;
+                    } else {
+                        x.push((rule.result, rule.weight));
+                    }
                 } else {
-                    x.push((rule.result, rule.weight));
+                    let mut tmp = SmallVec::<[(TileId, f32); 128]>::new();
+                    tmp.push((rule.result, rule.weight));
+                    result.push((neighbour_offsets.clone(), tmp));
                 }
-            } else {
-                let mut tmp = SmallVec::<[(TileId, f32); 128]>::new();
-                tmp.push((rule.result, rule.weight));
-                result.push((neighbour_offsets.clone(), tmp));
             }
         }
         let mut result2 = SmallVec::<[(TileId,f32); 128]>::new();
@@ -286,7 +312,7 @@ impl MapStates {
 }
 
 pub struct MapGenerator {
-    waveform_function: WaveformFunction,
+    waveform_functions: Vec<WaveformFunction>,
     rows: usize,
     cols: usize,
     preassigned_tiles: HashMap<(usize, usize), TileId>,
@@ -295,9 +321,11 @@ pub struct MapGenerator {
 }
 
 struct MapGenerationState {
+    at_wf_idx: usize,
     map_states: MapStates,
     stack: Vec<(usize, usize)>,
     result: Vec<Vec<TileId>>,
+    is_stuck: bool,
 }
 
 impl MapGenerationState {
@@ -311,13 +339,16 @@ impl MapGenerationState {
             result.push(row);
         }
         MapGenerationState {
+            at_wf_idx: 0,
             map_states: MapStates::new(rows, cols, num_unique_tiles),
             stack: Vec::new(),
             result,
+            is_stuck: false,
         }
     }
 
     pub fn reset(&mut self, seed: u32) {
+        self.at_wf_idx = 0;
         self.map_states.reset(seed);
         self.stack.clear();
         for i in 0..self.result.len() {
@@ -326,15 +357,16 @@ impl MapGenerationState {
                 *cell = TileId(0);
             }
         }
+        self.is_stuck = false;
     }
 }
 
 impl MapGenerator {
-    pub fn new(waveform_function: WaveformFunction, rows: usize, cols: usize) -> MapGenerator {
+    pub fn new(waveform_functions: Vec<WaveformFunction>, rows: usize, cols: usize) -> MapGenerator {
         let generation_state =
-            MapGenerationState::new(rows, cols, waveform_function.num_unique_tiles);
+            MapGenerationState::new(rows, cols, waveform_functions[0].num_unique_tiles);
         MapGenerator {
-            waveform_function,
+            waveform_functions,
             rows,
             cols,
             preassigned_tiles: HashMap::new(),
@@ -373,6 +405,31 @@ impl MapGenerator {
         self.assign_tile(x, y, tile_id);
     }
 
+    pub fn with_assigned_random_tiles_from_original_map(mut self, map: &Vec<Vec<TileId>>, quantity: usize) -> Self {
+        self.assign_random_tiles_from_original_map(map, quantity);
+        self
+    }
+
+    pub fn assign_random_tiles_from_original_map(&mut self, map: &Vec<Vec<TileId>>, quantity: usize) {
+        let offset_x: usize;
+        if self.cols < map[0].len() {
+            offset_x = (self.generation_state.map_states.prng.gen() % ((map[0].len() - self.cols) as u32)) as usize;
+        } else {
+            offset_x = 0;
+        }
+        let offset_y: usize;
+        if self.rows < map.len() {
+            offset_y = (self.generation_state.map_states.prng.gen() % ((map.len() - self.cols) as u32)) as usize;
+        } else {
+            offset_y = 0;
+        }
+        for _i in 0..quantity {
+            let x = (self.generation_state.map_states.prng.gen() % (self.cols.min(map[0].len()) as u32)) as usize;
+            let y = (self.generation_state.map_states.prng.gen() % (self.rows.min(map.len()) as u32)) as usize;
+            self.assign_tile(x, y, TileId(map[offset_y + y][offset_x + x].0.min(64*2-1)));
+        }
+    }
+
     pub fn map(&self) -> &Vec<Vec<TileId>> {
         &self.generation_state.result
     }
@@ -385,57 +442,59 @@ impl MapGenerator {
         let map_states = &mut self.generation_state.map_states;
         let stack = &mut self.generation_state.stack;
         let result = &mut self.generation_state.result;
+        let at_wf_idx = &mut self.generation_state.at_wf_idx;
+        let is_stuck = &mut self.generation_state.is_stuck;
+        if stack.is_empty() && *is_stuck && *at_wf_idx < self.waveform_functions.len()-1 {
+            *is_stuck = false;
+            *at_wf_idx += 1;
+            bevy::log::info!("Next waveform function.");
+            let mut bitset = TinyBitSet::<u64,2>::new();
+            for i in 0..map_states.num_unique_tiles.min(64*2) {
+                bitset.insert(i);
+            }
+            for i in 0..self.rows {
+                for j in 0..self.cols {
+                    if map_states.states[i][j].len() != 1 {
+                        map_states.states[i][j] = bitset;
+                    } else {
+                        stack.push((j,i));
+                    }
+                }
+            }
+        }
+        let waveform_function = &self.waveform_functions[*at_wf_idx];
         // Propergate constraints
         loop {
             if stack.is_empty() {
                 break;
             }
             let (at_x, at_y) = stack.remove(0);
-            if at_x > 0 {
-                let next_x = at_x - 1;
-                let next_y = at_y;
+            for &offset in &waveform_function.rule_offsets {
+                let next_x = (at_x as i32) - (offset.0 as i32);
+                if next_x < 0 || next_x >= self.cols as i32 {
+                    continue;
+                }
+                let next_x = next_x as usize;
+                let next_y = (at_y as i32) - (offset.1 as i32);
+                if next_y < 0 || next_y >= self.rows as i32 {
+                    continue;
+                }
+                let next_y = next_y as usize;
                 let changed =
-                    map_states.update_possible_tiles(&self.waveform_function, next_x, next_y);
+                    map_states.update_possible_tiles(waveform_function, next_x, next_y);
                 if changed {
                     stack.push((next_x, next_y));
                 }
-            }
-            if at_x < self.cols - 1 {
-                let next_x = at_x + 1;
-                let next_y = at_y;
-                let changed =
-                    map_states.update_possible_tiles(&self.waveform_function, next_x, next_y);
-                if changed {
-                    stack.push((next_x, next_y));
-                }
-            }
-            if at_y > 0 {
-                let next_x = at_x;
-                let next_y = at_y - 1;
-                let changed =
-                    map_states.update_possible_tiles(&self.waveform_function, next_x, next_y);
-                if changed {
-                    stack.push((next_x, next_y));
-                }
-            }
-            if at_y < self.rows - 1 {
-                let next_x = at_x;
-                let next_y = at_y + 1;
-                let changed =
-                    map_states.update_possible_tiles(&self.waveform_function, next_x, next_y);
-                if changed {
-                    stack.push((next_x, next_y));
-                }
-            }
+            } 
         }
         // Find tile coords with lowest entropy
         let mut min_entropy: Option<(f32, (usize, usize))> = None;
         for i in 0..self.rows {
             for j in 0..self.cols {
-                if map_states.states[i][j].len() == 1 {
+                if map_states.states[i][j].len() < 2 {
                     continue;
                 }
-                let entropy = map_states.entropy(&self.waveform_function, j, i);
+                let entropy = map_states.entropy(waveform_function, j, i);
                 if min_entropy.is_none() || entropy < min_entropy.unwrap().0 {
                     min_entropy = Some((entropy, (j, i)));
                 }
@@ -443,8 +502,10 @@ impl MapGenerator {
         }
         // Pick a tile at random for the lowest entropy cell
         if let Some((_, (at_x, at_y))) = min_entropy {
-            map_states.assign_random(&self.waveform_function, at_x, at_y);
+            map_states.assign_random(waveform_function, at_x, at_y);
             stack.push((at_x, at_y));
+        } else {
+            *is_stuck = true;
         }
         for (i, row) in map_states.states.iter().enumerate() {
             for (j, cell) in row.iter().enumerate() {
