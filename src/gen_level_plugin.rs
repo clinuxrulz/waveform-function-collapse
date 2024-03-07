@@ -109,8 +109,8 @@ impl Plugin for GenLevelPlugin {
 const GEN_MODEL_TILE_SIZE: usize = 16;
 
 const GEN_MODEL_FROM_FILENAMES: [&str; 5] = [
-    "super-mario-bros-3-1-1-bg.png",
     "super-mario-bros-3-1-2-bg.png",
+    "super-mario-bros-3-1-1-bg.png",
     "super-mario-bros-3-1-3-bg.png",
     "super-mario-bros-3-1-5-bg.png",
     "airship.png",
@@ -399,12 +399,13 @@ fn generate_model_analyze_image_startup(
         }
     }
     info!("{map:?}");
-    let map_generator =
+    let mut map_generator =
         MapGenerator::new(
             vec![/*waveform_function_1,waveform_function_2,*/waveform_function_3],
             (window_height as usize) / GEN_MODEL_TILE_SIZE,
             (window_width as usize) / GEN_MODEL_TILE_SIZE,
         ).with_assigned_random_tiles_from_original_map(&map, 10);
+    map_generator.init_propergate();
     commands.insert_resource(GenerateModelMapState {
         map,
         num_rows,
@@ -443,6 +444,7 @@ fn generate_model_generate_map(
         generate_model_map_state.map_generator.reset(seed);
         let generate_model_map_state = &mut *generate_model_map_state;
         generate_model_map_state.map_generator.assign_random_tiles_from_original_map(&generate_model_map_state.map, 10);
+        generate_model_map_state.map_generator.init_propergate();
     };
     let mut next_level = || {
         next_state.set(PluginState::NextLevel);

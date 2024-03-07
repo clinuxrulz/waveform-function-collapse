@@ -222,7 +222,11 @@ impl MapStates {
     fn propergate_possible_tiles(&mut self, start_x: usize, start_y: usize, waveform_function: &WaveformFunction) {
         let mut stack = Vec::<(usize,usize)>::new();
         stack.push((start_x, start_y));
-        while let Some((at_x, at_y)) = stack.pop() {
+        loop {
+            if stack.is_empty() {
+                break;
+            }
+            let (at_x, at_y) = stack.remove(0);
             for &offset in &waveform_function.rule_offsets {
                 let next_x = (at_x as i32) - (offset.0 as i32);
                 if next_x < 0 || next_x >= self.cols as i32 {
@@ -538,6 +542,15 @@ impl MapGenerator {
         self.preassigned_tiles.insert((x, y), tile_id);
         self.generation_state.map_states.assign_tile(x, y, tile_id);
         self.generation_state.stack.push((x, y));
+        //self.generation_state.map_states.propergate_possible_tiles(x, y, &self.waveform_functions[0]);
+    }
+
+    pub fn init_propergate(&mut self) {
+        let stack = &mut self.generation_state.stack;
+        let map_states = &mut self.generation_state.map_states;
+        while let Some((x,y)) = stack.pop() {
+            map_states.propergate_possible_tiles(x, y, &self.waveform_functions[0]);
+        }
     }
 
     pub fn with_random_tile_at_random_spot(mut self) -> Self {
@@ -568,14 +581,19 @@ impl MapGenerator {
         }
         let offset_y: usize;
         if self.rows < map.len() {
-            offset_y = (self.generation_state.map_states.prng.gen() % ((map.len() - self.cols) as u32)) as usize;
+            offset_y = (self.generation_state.map_states.prng.gen() % ((map.len() - self.rows) as u32)) as usize;
         } else {
             offset_y = 0;
         }
         for _i in 0..quantity {
             let x = (self.generation_state.map_states.prng.gen() % (self.cols.min(map[0].len()) as u32)) as usize;
             let y = (self.generation_state.map_states.prng.gen() % (self.rows.min(map.len()) as u32)) as usize;
-            self.assign_tile(x, y, TileId(map[offset_y + y][offset_x + x].0.min(64*2-1)));
+            let t = map[offset_y + y][offset_x + x];
+            if t.0 >= 64*2 {
+                continue;
+            }
+
+            self.assign_tile(x, y, t);
         }
     }
 
