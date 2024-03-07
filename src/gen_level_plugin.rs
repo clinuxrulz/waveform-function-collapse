@@ -356,7 +356,6 @@ fn generate_model_analyze_image_startup(
             }
         }
     }
-    */
     let mut waveform_function_2 = WaveformFunction::new();
     for i in 0..map.len() {
         let row = &map[i];
@@ -377,10 +376,32 @@ fn generate_model_analyze_image_startup(
             }
         }
     }
+    */
+    let mut waveform_function_3 = WaveformFunction::new();
+    for (i, row) in map.iter().enumerate() {
+        for (j, &at_tile_id) in row.iter().enumerate() {
+            waveform_function_3.inc_count_for_tile(at_tile_id);
+            if j > 0 && i > 0 && j < row.len()-1 && i < map.len() - 1 {
+                waveform_function_3.accum_weight(
+                    at_tile_id,
+                    &([
+                        (-1,0),
+                        (-1,-1),
+                        (0,-1),
+                        (1,-1),
+                        (1,0),
+                        (1,1),
+                        (0,1),
+                        (-1,1)
+                    ] as [(i8,i8);8]).map(|offset| (offset, map[((i as i32) + (offset.1 as i32)) as usize][((j as i32) + (offset.0 as i32)) as usize]))
+                );
+            }
+        }
+    }
     info!("{map:?}");
     let map_generator =
         MapGenerator::new(
-            vec![/*waveform_function_1,*/waveform_function_2],
+            vec![/*waveform_function_1,waveform_function_2,*/waveform_function_3],
             (window_height as usize) / GEN_MODEL_TILE_SIZE,
             (window_width as usize) / GEN_MODEL_TILE_SIZE,
         ).with_assigned_random_tiles_from_original_map(&map, 10);

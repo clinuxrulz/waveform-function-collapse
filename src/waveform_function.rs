@@ -124,10 +124,17 @@ impl Prng {
     }
 }
 
+struct SavedState {
+    states: Vec<Vec<TinyBitSet<u64, 2>>>,
+    current_path: Option<((usize, usize), TileId)>,
+}
+
 struct MapStates {
     rows: usize,
     cols: usize,
     num_unique_tiles: usize,
+    saved_state_stack: Vec<SavedState>,
+    at_deadend: bool,
     states: Vec<Vec<TinyBitSet<u64, 2>>>,
     prng: Prng,
 }
@@ -150,12 +157,124 @@ impl MapStates {
             rows,
             cols,
             num_unique_tiles,
+            saved_state_stack: Vec::new(),
+            at_deadend: false,
             states,
             prng: Prng::new(),
         }
     }
 
+    fn backtrack(&mut self, waveform_function: &WaveformFunction) -> bool {
+        bevy::log::info!("Backtrack");
+        if let Some(saved_state) = self.saved_state_stack.pop() {
+            self.states = saved_state.states;
+            if let Some((location, tile_id)) = saved_state.current_path {
+                self.states[location.1][location.0].remove(tile_id.0);
+                self.at_deadend = false;
+                self.propergate_possible_tiles(location.0, location.1, waveform_function);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    fn all_tiles_are_assigned(&self) -> bool {
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                if self.states[i][j].len() != 1 {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    fn take_random_path(&mut self, waveform_function: &WaveformFunction) -> bool {
+        // Find tile coords with lowest entropy
+        let mut min_entropy: Option<(f32, (usize, usize))> = None;
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                if self.states[i][j].len() < 2 {
+                    continue;
+                }
+                let entropy = self.entropy(waveform_function, j, i);
+                if min_entropy.is_none() || entropy < min_entropy.unwrap().0 {
+                    min_entropy = Some((entropy, (j, i)));
+                }
+            }
+        }
+        let Some(min_entropy) = min_entropy else { return false; };
+        let Some(tile_id) = self.pick_random(waveform_function, min_entropy.1.0, min_entropy.1.1) else {
+            self.at_deadend = true;
+            return false;
+        };
+        bevy::log::info!("Choose tile {} at ({},{})", tile_id.0, min_entropy.1.0, min_entropy.1.1);
+        if let Some(saved_state) = self.saved_state_stack.last_mut() {
+            saved_state.current_path = Some((min_entropy.1, tile_id));
+        }
+        self.assign_tile(min_entropy.1.0, min_entropy.1.1, tile_id);
+        // Update possible tiles
+        self.propergate_possible_tiles(min_entropy.1.0, min_entropy.1.1, waveform_function);
+        true
+    }
+
+    fn propergate_possible_tiles(&mut self, start_x: usize, start_y: usize, waveform_function: &WaveformFunction) {
+        let mut stack = Vec::<(usize,usize)>::new();
+        stack.push((start_x, start_y));
+        while let Some((at_x, at_y)) = stack.pop() {
+            for &offset in &waveform_function.rule_offsets {
+                let next_x = (at_x as i32) - (offset.0 as i32);
+                if next_x < 0 || next_x >= self.cols as i32 {
+                    continue;
+                }
+                let next_x = next_x as usize;
+                let next_y = (at_y as i32) - (offset.1 as i32);
+                if next_y < 0 || next_y >= self.rows as i32 {
+                    continue;
+                }
+                let next_y = next_y as usize;
+                let changed =
+                    self.update_possible_tiles(waveform_function, next_x, next_y);
+                if changed {
+                    if self.states[next_y][next_x].is_empty() {
+                        self.at_deadend = true;
+                        break;
+                    }
+                    stack.push((next_x, next_y));
+                }
+            } 
+        }
+    }
+
+    fn iterate(&mut self, waveform_function: &WaveformFunction) -> bool {
+        bevy::log::info!("Iterate");
+        self.saved_state_stack.push(SavedState {
+            states: self.states.clone(),
+            current_path: None
+        });
+        let success = self.take_random_path(waveform_function);
+        if success {
+            self.saved_state_stack.push(SavedState {
+                states: self.states.clone(),
+                current_path: None,
+            });
+        }
+        if self.at_deadend {
+            while self.at_deadend {
+                let success = self.backtrack(waveform_function);
+                if !success {
+                    bevy::log::info!("Stuck 2");
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     fn reset(&mut self, seed: u32) {
+        self.at_deadend = false;
+        self.saved_state_stack.clear();
         self.prng.seed = seed;
         let mut bitset: TinyBitSet<u64, 2> = TinyBitSet::new();
         for k in 0..self.num_unique_tiles.min(64 * 2) {
@@ -170,6 +289,36 @@ impl MapStates {
 
     fn assign_tile(&mut self, x: usize, y: usize, tile_id: TileId) {
         self.states[y][x] = TinyBitSet::new().assigned(tile_id.0.min(64*2-1), true);
+    }
+
+    fn pick_random(&mut self, waveform_function: &WaveformFunction, x: usize, y: usize) -> Option<TileId> {
+        let bitset = self.states[y][x];
+        if bitset.is_empty() {
+            return None;
+        }
+        let possible_tiles = self.possible_tiles_weighted(waveform_function, x, y);
+        let mut total_count: f32 = 0.0;
+        let mut average_weight: f32 = 0.0;
+        for &(_, weight) in &possible_tiles {
+            average_weight += weight;
+        }
+        average_weight /= possible_tiles.len() as f32;
+        let caos = 0.0f32; // <-- no caos for now
+        let apply_caos = |x: f32| {
+            x*(1.0-caos) + average_weight*caos
+        };
+        for &(_, weight) in &possible_tiles {
+            total_count += apply_caos(weight);
+        }
+        let mut random = (((self.prng.gen() as f64) / (u32::MAX as f64)) as f32) * total_count;
+        for &(tile_id, weight) in &possible_tiles {
+            let weight = apply_caos(weight);
+            if weight >= random {
+                return Some(tile_id);
+            }
+            random -= weight;
+        }
+        possible_tiles.last().map(|x| x.0)
     }
 
     fn assign_random(&mut self, waveform_function: &WaveformFunction, x: usize, y: usize) {
@@ -438,7 +587,28 @@ impl MapGenerator {
         self.generation_state.map_states.states[y][x].len() == 1
     }
 
-    pub fn iterate(&mut self) {
+    pub fn iterate(&mut self) -> bool {
+        if !self.generation_state.map_states.all_tiles_are_assigned() {
+            let at_wf_idx = &mut self.generation_state.at_wf_idx;
+            let success = self.generation_state.map_states.iterate(&self.waveform_functions[*at_wf_idx]);
+            if !success {
+                if *at_wf_idx < self.waveform_functions.len()-1 {
+                    *at_wf_idx += 1;
+                } else {
+                    return false;
+                }
+            }
+            for (i, row) in self.generation_state.map_states.states.iter().enumerate() {
+                for (j, cell) in row.iter().enumerate() {
+                    let tile_id = TileId(cell.iter().next().unwrap_or(0));
+                    self.generation_state.result[i][j] = tile_id;
+                }
+            }
+            return true;
+        } else {
+            return false;
+        }
+        /*
         let map_states = &mut self.generation_state.map_states;
         let stack = &mut self.generation_state.stack;
         let result = &mut self.generation_state.result;
@@ -512,6 +682,6 @@ impl MapGenerator {
                 let tile_id = TileId(cell.iter().next().unwrap_or(0));
                 result[i][j] = tile_id;
             }
-        }
+        }*/
     }
 }
