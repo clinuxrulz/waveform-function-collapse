@@ -258,12 +258,6 @@ impl MapStates {
             current_path: None
         });
         let success = self.take_random_path(waveform_function);
-        if success {
-            self.saved_state_stack.push(SavedState {
-                states: self.states.clone(),
-                current_path: None,
-            });
-        }
         if self.at_deadend {
             while self.at_deadend {
                 let success = self.backtrack(waveform_function);
