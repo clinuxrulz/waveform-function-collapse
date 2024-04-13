@@ -1,0 +1,10 @@
+<html>
+    <head></head>
+    <body>
+        <script type="module">
+            import { makePropergateFn } from "./src/index.ts";
+            let propergate = makePropergateFn(5, 5, 5, 5, 5);
+            console.log(propergate([[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]], [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]));
+        </script>
+    </body>
+</html>
