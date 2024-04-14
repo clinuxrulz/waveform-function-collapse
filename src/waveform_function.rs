@@ -638,6 +638,17 @@ impl MapGenerator {
                     }
                     target_hash = next_hash;
                 }
+                for i in 0..self.rows {
+                    for j in 0..self.cols {
+                        let mut bits: TinyBitSet<u64,2> = TinyBitSet::new();
+                        for k in 0..waveform_function.num_unique_tiles {
+                            if target_map[i][j][k] != 0 {
+                                bits.insert(k);
+                            }
+                        }
+                        self.generation_state.map_states.states[i][j] = bits;
+                    }
+                }
                 return true;
             } else {
                 let at_wf_idx = &mut self.generation_state.at_wf_idx;
