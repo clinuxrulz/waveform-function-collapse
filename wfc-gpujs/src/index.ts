@@ -1,4 +1,5 @@
 import { GPU } from "gpu.js";
+import { real_main } from "../../pkg/waveform_function_collapse_lib";
 
 const gpu = new GPU();
 
@@ -72,3 +73,5 @@ export function makePropergateFn(sourceMapRows: number, sourceMapCols: number, t
     });
     return (sourceMap: number[][], targetMap: number[][][]) => propergate(sourceMap, targetMap) as number[][][];
 }
+
+real_main();
