@@ -14,5 +14,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bevy = "0.13.0"
+js-sys = "0.3.69"
 tinybitset = "0.0.1"
 wasm-bindgen = "0.2.91"
