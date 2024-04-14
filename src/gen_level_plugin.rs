@@ -1,4 +1,6 @@
-use crate::waveform_function::{MapGenerator, TileId, WaveformFunction};
+use std::borrow::Borrow;
+
+use crate::{waveform_function::{MapGenerator, TileId, WaveformFunction}, MakePropergateFn, PropergateFn};
 use bevy::{
     asset::LoadState,
     prelude::*,
@@ -239,6 +241,7 @@ fn generate_model_analyze_image_startup(
     mut next_state: ResMut<NextState<PluginState>>,
     mut commands: Commands,
     windows: Query<&Window, With<PrimaryWindow>>,
+    make_propergate_fn: Option<Res<MakePropergateFn>>,
 ) {
     let mut window_width: f32 = 0.0;
     let mut window_height: f32 = 0.0;
@@ -377,7 +380,7 @@ fn generate_model_analyze_image_startup(
         }
     }
     */
-    let mut waveform_function_3 = WaveformFunction::new();
+    let mut waveform_function_3 = WaveformFunction::new(map.clone());
     for (i, row) in map.iter().enumerate() {
         for (j, &at_tile_id) in row.iter().enumerate() {
             waveform_function_3.inc_count_for_tile(at_tile_id);
@@ -399,13 +402,20 @@ fn generate_model_analyze_image_startup(
         }
     }
     info!("{map:?}");
+    let target_rows = (window_height as usize) / GEN_MODEL_TILE_SIZE;
+    let target_cols = (window_width as usize) / GEN_MODEL_TILE_SIZE;
+    let num_tile_types = next_id;
     let mut map_generator =
         MapGenerator::new(
             vec![/*waveform_function_1,waveform_function_2,*/waveform_function_3],
-            (window_height as usize) / GEN_MODEL_TILE_SIZE,
-            (window_width as usize) / GEN_MODEL_TILE_SIZE,
+            target_rows,
+            target_cols,
         ).with_assigned_random_tiles_from_original_map(&map, 10);
     map_generator.init_propergate();
+    if let Some(make_propergate_fn) = make_propergate_fn {
+        let propergate_fn = make_propergate_fn.call(map.len(), map[0].len(), target_rows, target_cols, num_tile_types);
+        commands.insert_resource(propergate_fn);
+    }
     commands.insert_resource(GenerateModelMapState {
         map,
         num_rows,
@@ -414,7 +424,7 @@ fn generate_model_analyze_image_startup(
         tile_id_tile_map,
         seed: 1,
         map_generator,
-        num_tile_types: next_id,
+        num_tile_types,
     });
     next_state.set(PluginState::GenerateMap);
 }
@@ -435,8 +445,10 @@ fn generate_model_generate_map(
     key: Res<ButtonInput<KeyCode>>,
     mut events: EventReader<Action>,
     mut next_state: ResMut<NextState<PluginState>>,
+    propergate_fn: Option<Res<PropergateFn>>,
 ) {
-    generate_model_map_state.map_generator.iterate();
+    let propergate_fn = propergate_fn.map(|x| x.into_inner());
+    generate_model_map_state.map_generator.iterate(propergate_fn);
     let mut change_seed = || {
         let seed = generate_model_map_state.seed;
         info!("seed = {seed}");

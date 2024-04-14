@@ -1,6 +1,10 @@
-use bevy::utils::{smallvec::SmallVec, HashMap};
+use std::hash::{Hash, Hasher};
+
+use bevy::utils::{smallvec::SmallVec, AHasher, HashMap};
 use tinybitset::TinyBitSet;
 use bevy::utils::HashSet;
+
+use crate::PropergateFn;
 
 #[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TileId(pub usize);
@@ -25,16 +29,11 @@ pub struct WaveformFunction {
     rules: Vec<Rule>,
     rule_offsets: HashSet<(i8,i8)>,
     tile_rules_map: HashMap<TileId,Vec<Rule>>,
-}
-
-impl Default for WaveformFunction {
-    fn default() -> Self {
-        Self::new()
-    }
+    original_map: Vec<Vec<TileId>>,
 }
 
 impl WaveformFunction {
-    pub fn new() -> WaveformFunction {
+    pub fn new(original_map: Vec<Vec<TileId>>) -> WaveformFunction {
         WaveformFunction {
             total_tiles: 0,
             num_unique_tiles: 0,
@@ -42,6 +41,7 @@ impl WaveformFunction {
             rules: Vec::new(),
             rule_offsets: HashSet::new(),
             tile_rules_map: HashMap::new(),
+            original_map,
         }
     }
 
@@ -599,24 +599,64 @@ impl MapGenerator {
         self.generation_state.map_states.states[y][x].len() == 1
     }
 
-    pub fn iterate(&mut self) -> bool {
+    pub fn iterate(&mut self, propergate_fn: Option<&PropergateFn>) -> bool {
         if !self.generation_state.map_states.all_tiles_are_assigned() {
-            let at_wf_idx = &mut self.generation_state.at_wf_idx;
-            let success = self.generation_state.map_states.iterate(&self.waveform_functions[*at_wf_idx]);
-            if !success {
-                if *at_wf_idx < self.waveform_functions.len()-1 {
-                    *at_wf_idx += 1;
-                } else {
-                    return false;
+            if let Some(propergate_fn) = propergate_fn {
+                let waveform_function = &self.waveform_functions[0];
+                let mut source_map: Vec<Vec<usize>> = Vec::with_capacity(waveform_function.original_map.len());
+                for i in 0..waveform_function.original_map.len() {
+                    let mut source_map_row: Vec<usize> = Vec::with_capacity(waveform_function.original_map[i].len());
+                    for j in 0..waveform_function.original_map[i].len() {
+                        source_map_row.push(waveform_function.original_map[i][j].0);
+                    }
+                    source_map.push(source_map_row);
                 }
-            }
-            for (i, row) in self.generation_state.map_states.states.iter().enumerate() {
-                for (j, cell) in row.iter().enumerate() {
-                    let tile_id = TileId(cell.iter().next().unwrap_or(0));
-                    self.generation_state.result[i][j] = tile_id;
+                let mut target_map: Vec<Vec<Vec<usize>>> = Vec::with_capacity(self.rows);
+                for i in 0..self.rows {
+                    let mut target_map_row: Vec<Vec<usize>> = Vec::with_capacity(self.cols);
+                    for j in 0..self.cols {
+                        let mut target_map_tiles: Vec<usize> = Vec::with_capacity(waveform_function.num_unique_tiles);
+                        for k in 0..waveform_function.num_unique_tiles {
+                            let has = self.generation_state.map_states.states[i][j].iter().any(|x| x == k);
+                            target_map_tiles.push(if has { 1 } else { 0 });
+                        }
+                        target_map_row.push(target_map_tiles);
+                    }
+                    target_map.push(target_map_row);
                 }
+                propergate_fn.call(&source_map, &mut target_map);
+                let mut hasher = AHasher::default();
+                target_map.hash(&mut hasher);
+                let mut target_hash = hasher.finish();
+                loop {
+                    propergate_fn.call(&source_map, &mut target_map);
+                    let mut hasher = AHasher::default();
+                    target_map.hash(&mut hasher);
+                    let next_hash = hasher.finish();
+                    if next_hash == target_hash {
+                        break;
+                    }
+                    target_hash = next_hash;
+                }
+                return true;
+            } else {
+                let at_wf_idx = &mut self.generation_state.at_wf_idx;
+                let success = self.generation_state.map_states.iterate(&self.waveform_functions[*at_wf_idx]);
+                if !success {
+                    if *at_wf_idx < self.waveform_functions.len()-1 {
+                        *at_wf_idx += 1;
+                    } else {
+                        return false;
+                    }
+                }
+                for (i, row) in self.generation_state.map_states.states.iter().enumerate() {
+                    for (j, cell) in row.iter().enumerate() {
+                        let tile_id = TileId(cell.iter().next().unwrap_or(0));
+                        self.generation_state.result[i][j] = tile_id;
+                    }
+                }
+                return true;
             }
-            return true;
         } else {
             return false;
         }
