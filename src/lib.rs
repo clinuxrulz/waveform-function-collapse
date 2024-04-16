@@ -1,4 +1,4 @@
-use bevy::{prelude::*, render::extract_resource::ExtractResource};
+use bevy::{asset::AssetMetaCheck, prelude::*, render::extract_resource::ExtractResource};
 
 mod gen_level_plugin;
 pub mod waveform_function;
@@ -86,6 +86,7 @@ pub fn real_main_with_make_propergate_fn(make_propergate_fn: js_sys::Function) {
     let make_propergate_fn: MakePropergateFn = MakePropergateFn { make_propergate_fn };
     let mut app = App::new();
     app
+        .insert_resource(AssetMetaCheck::Never)
         .add_plugins((
             DefaultPlugins,
             gen_level_plugin::GenLevelPlugin,
