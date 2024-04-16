@@ -62,7 +62,7 @@ export function makePropergateFn(sourceMapRows: number, sourceMapCols: number, t
         }
         return result;
     }, {
-        output: [targetMapRows, targetMapColumns],
+        output: [targetMapRows, targetMapColumns, numUniqueTiles],
         constants: {
             sourceMapRows,
             sourceMapCols,
