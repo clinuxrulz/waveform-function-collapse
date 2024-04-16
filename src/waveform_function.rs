@@ -244,10 +244,15 @@ impl MapStates {
                     continue;
                 }
                 let mut bits: TinyBitSet<u64,2> = TinyBitSet::new();
+                let mut at_dead_end = true;
                 for k in 0..waveform_function.num_unique_tiles {
                     if target_map[i][j][k] != 0 {
                         bits.insert(k);
+                        at_dead_end = false;
                     }
+                }
+                if at_dead_end {
+                    self.at_deadend = true;
                 }
                 self.states[i][j] = bits;
             }
