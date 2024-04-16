@@ -240,6 +240,9 @@ impl MapStates {
         bevy::log::info!("End: Propergating on GPU");
         for i in 0..self.rows {
             for j in 0..self.cols {
+                if self.states[i][j].len() < 2 {
+                    continue;
+                }
                 let mut bits: TinyBitSet<u64,2> = TinyBitSet::new();
                 for k in 0..waveform_function.num_unique_tiles {
                     if target_map[i][j][k] != 0 {
