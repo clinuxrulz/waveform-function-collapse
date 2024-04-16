@@ -1,8 +1,10 @@
 use std::hash::{Hash, Hasher};
 
-use bevy::utils::{smallvec::SmallVec, AHasher, HashMap};
+use bevy::utils::{smallvec::SmallVec, AHasher, FixedState, HashMap};
 use tinybitset::TinyBitSet;
 use bevy::utils::HashSet;
+
+use std::hash::BuildHasher;
 
 use crate::PropergateFn;
 
@@ -190,6 +192,94 @@ impl MapStates {
         return true;
     }
 
+    fn propergate_2(&mut self, waveform_function: &WaveformFunction, propergate_fn: &PropergateFn) {
+        let mut source_map: Vec<Vec<usize>> = Vec::with_capacity(waveform_function.original_map.len());
+        for i in 0..waveform_function.original_map.len() {
+            let mut source_map_row: Vec<usize> = Vec::with_capacity(waveform_function.original_map[i].len());
+            for j in 0..waveform_function.original_map[i].len() {
+                source_map_row.push(waveform_function.original_map[i][j].0);
+            }
+            source_map.push(source_map_row);
+        }
+        let mut target_map: Vec<Vec<Vec<usize>>> = Vec::with_capacity(self.rows);
+        for i in 0..self.rows {
+            let mut target_map_row: Vec<Vec<usize>> = Vec::with_capacity(self.cols);
+            for j in 0..self.cols {
+                let mut target_map_tiles: Vec<usize> = Vec::with_capacity(waveform_function.num_unique_tiles);
+                for k in 0..waveform_function.num_unique_tiles {
+                    let has = self.states[i][j].iter().any(|x| x == k);
+                    target_map_tiles.push(if has { 1 } else { 0 });
+                }
+                target_map_row.push(target_map_tiles);
+            }
+            target_map.push(target_map_row);
+        }
+        propergate_fn.call(&source_map, &mut target_map);
+        let mut hasher = FixedState::default().build_hasher();
+        target_map.hash(&mut hasher);
+        let mut target_hash = hasher.finish();
+        let mut visited_hashes = HashSet::new();
+        bevy::log::info!("Start: Propergating on GPU");
+        bevy::log::info!("Target hash: {}", target_hash);
+        visited_hashes.insert(target_hash);
+        loop {
+            propergate_fn.call(&source_map, &mut target_map);
+            let mut hasher = FixedState::default().build_hasher();
+            target_map.hash(&mut hasher);
+            let next_hash = hasher.finish();
+            if visited_hashes.contains(&next_hash) {
+                break;
+            }
+            visited_hashes.insert(next_hash);
+            if next_hash == target_hash {
+                break;
+            }
+            target_hash = next_hash;
+            bevy::log::info!("Target hash: {}", target_hash);
+        }
+        bevy::log::info!("End: Propergating on GPU");
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                let mut bits: TinyBitSet<u64,2> = TinyBitSet::new();
+                for k in 0..waveform_function.num_unique_tiles {
+                    if target_map[i][j][k] != 0 {
+                        bits.insert(k);
+                    }
+                }
+                self.states[i][j] = bits;
+            }
+        }
+    }
+
+    fn take_random_path_2(&mut self, waveform_function: &WaveformFunction, propergate_fn: &PropergateFn) -> bool {
+        // Find tile coords with lowest entropy
+        let mut min_entropy: Option<(f32, (usize, usize))> = None;
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                if self.states[i][j].len() < 2 {
+                    continue;
+                }
+                let entropy = self.entropy(waveform_function, j, i);
+                if min_entropy.is_none() || entropy < min_entropy.unwrap().0 {
+                    min_entropy = Some((entropy, (j, i)));
+                }
+            }
+        }
+        let Some(min_entropy) = min_entropy else { return false; };
+        let Some(tile_id) = self.pick_random(waveform_function, min_entropy.1.0, min_entropy.1.1) else {
+            self.at_deadend = true;
+            return false;
+        };
+        bevy::log::info!("Choose tile {} at ({},{})", tile_id.0, min_entropy.1.0, min_entropy.1.1);
+        if let Some(saved_state) = self.saved_state_stack.last_mut() {
+            saved_state.current_path = Some((min_entropy.1, tile_id));
+        }
+        self.assign_tile(min_entropy.1.0, min_entropy.1.1, tile_id);
+        // Update possible tiles
+        self.propergate_2(waveform_function, propergate_fn);
+        true
+    }
+
     fn take_random_path(&mut self, waveform_function: &WaveformFunction) -> bool {
         // Find tile coords with lowest entropy
         let mut min_entropy: Option<(f32, (usize, usize))> = None;
@@ -249,6 +339,25 @@ impl MapStates {
                 }
             } 
         }
+    }
+
+    fn iterate2(&mut self, waveform_function: &WaveformFunction, propergate_fn: &PropergateFn) -> bool {
+        bevy::log::info!("Iterate");
+        self.saved_state_stack.push(SavedState {
+            states: self.states.clone(),
+            current_path: None
+        });
+        let success = self.take_random_path_2(waveform_function, propergate_fn);
+        if self.at_deadend {
+            while self.at_deadend {
+                let success = self.backtrack(waveform_function);
+                if !success {
+                    bevy::log::info!("Stuck 2");
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     fn iterate(&mut self, waveform_function: &WaveformFunction) -> bool {
@@ -602,51 +711,19 @@ impl MapGenerator {
     pub fn iterate(&mut self, propergate_fn: Option<&PropergateFn>) -> bool {
         if !self.generation_state.map_states.all_tiles_are_assigned() {
             if let Some(propergate_fn) = propergate_fn {
-                let waveform_function = &self.waveform_functions[0];
-                let mut source_map: Vec<Vec<usize>> = Vec::with_capacity(waveform_function.original_map.len());
-                for i in 0..waveform_function.original_map.len() {
-                    let mut source_map_row: Vec<usize> = Vec::with_capacity(waveform_function.original_map[i].len());
-                    for j in 0..waveform_function.original_map[i].len() {
-                        source_map_row.push(waveform_function.original_map[i][j].0);
+                let at_wf_idx = &mut self.generation_state.at_wf_idx;
+                let success = self.generation_state.map_states.iterate2(&self.waveform_functions[*at_wf_idx], propergate_fn);
+                if !success {
+                    if *at_wf_idx < self.waveform_functions.len()-1 {
+                        *at_wf_idx += 1;
+                    } else {
+                        return false;
                     }
-                    source_map.push(source_map_row);
                 }
-                let mut target_map: Vec<Vec<Vec<usize>>> = Vec::with_capacity(self.rows);
-                for i in 0..self.rows {
-                    let mut target_map_row: Vec<Vec<usize>> = Vec::with_capacity(self.cols);
-                    for j in 0..self.cols {
-                        let mut target_map_tiles: Vec<usize> = Vec::with_capacity(waveform_function.num_unique_tiles);
-                        for k in 0..waveform_function.num_unique_tiles {
-                            let has = self.generation_state.map_states.states[i][j].iter().any(|x| x == k);
-                            target_map_tiles.push(if has { 1 } else { 0 });
-                        }
-                        target_map_row.push(target_map_tiles);
-                    }
-                    target_map.push(target_map_row);
-                }
-                propergate_fn.call(&source_map, &mut target_map);
-                let mut hasher = AHasher::default();
-                target_map.hash(&mut hasher);
-                let mut target_hash = hasher.finish();
-                loop {
-                    propergate_fn.call(&source_map, &mut target_map);
-                    let mut hasher = AHasher::default();
-                    target_map.hash(&mut hasher);
-                    let next_hash = hasher.finish();
-                    if next_hash == target_hash {
-                        break;
-                    }
-                    target_hash = next_hash;
-                }
-                for i in 0..self.rows {
-                    for j in 0..self.cols {
-                        let mut bits: TinyBitSet<u64,2> = TinyBitSet::new();
-                        for k in 0..waveform_function.num_unique_tiles {
-                            if target_map[i][j][k] != 0 {
-                                bits.insert(k);
-                            }
-                        }
-                        self.generation_state.map_states.states[i][j] = bits;
+                for (i, row) in self.generation_state.map_states.states.iter().enumerate() {
+                    for (j, cell) in row.iter().enumerate() {
+                        let tile_id = TileId(cell.iter().next().unwrap_or(0));
+                        self.generation_state.result[i][j] = tile_id;
                     }
                 }
                 return true;

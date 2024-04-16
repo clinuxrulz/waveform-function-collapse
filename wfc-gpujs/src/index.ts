@@ -1,12 +1,14 @@
 import { GPU } from "gpu.js";
 import { real_main_with_make_propergate_fn } from "../../pkg/waveform_function_collapse_lib";
 
-const gpu = new GPU();
+const gpu = new GPU({
+    mode: "webgl"
+});
 
 export function makePropergateFn(sourceMapRows: number, sourceMapCols: number, targetMapRows: number, targetMapColumns: number, numUniqueTiles: number): (sourceMap: number[][], targetMap: number[][][]) => number[][][] {
     const propergate = gpu.createKernel(function(sourceMap: number[][], targetMap: number[][][]) {
-        let targetRow = this.thread.y;
-        let targetCol = this.thread.x;
+        let targetRow = this.thread.x;
+        let targetCol = this.thread.y;
         let targetTileIndex = this.thread.z;
         let targetVal = targetMap[targetRow][targetCol][targetTileIndex];
         if (targetVal == 0.0) {
