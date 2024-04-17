@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-use bevy::utils::{smallvec::SmallVec, AHasher, FixedState, HashMap};
+use bevy::utils::{smallvec::SmallVec, FixedState, HashMap};
 use tinybitset::TinyBitSet;
 use bevy::utils::HashSet;
 

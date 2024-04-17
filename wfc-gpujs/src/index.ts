@@ -1,64 +1,49 @@
 import { GPU } from "gpu.js";
 import { real_main_with_make_propergate_fn } from "../../pkg/waveform_function_collapse_lib";
 
+/*
 const gpu = new GPU({
     mode: "webgl"
 });
+*/
 
 export function makePropergateFn(sourceMapRows: number, sourceMapCols: number, targetMapRows: number, targetMapColumns: number, numUniqueTiles: number): (sourceMap: number[][], targetMap: number[][][]) => number[][][] {
-    const propergate = gpu.createKernel(function(sourceMap: number[][], targetMap: number[][][]) {
-        let targetRow = this.thread.y;
-        let targetCol = this.thread.z;
+    let impl = function(sourceMap: number[][], targetMap: number[][][]) {
+        let targetRow = this.thread.z;
+        let targetCol = this.thread.y;
         let targetTileIndex = this.thread.x;
         let targetVal = targetMap[targetRow][targetCol][targetTileIndex];
         let result = 0.0;
         if (targetVal != 0.0) {
-            for (let sourceRow = 0; sourceRow < (this.constants.sourceMapRows as number); sourceRow++) {
-                for (let sourceCol = 0; sourceCol < (this.constants.sourceMapCols as number); sourceCol++) {
+            for (let sourceRow = 1; sourceRow < (this.constants.sourceMapRows as number)-1; sourceRow++) {
+                for (let sourceCol = 1; sourceCol < (this.constants.sourceMapCols as number)-1; sourceCol++) {
                     let sourceVal = sourceMap[sourceRow][sourceCol];
                     if (sourceVal == targetTileIndex) {
-                        let match = 0;
-                        if (sourceRow > 0) {
-                            let sourceUp = sourceMap[sourceRow - 1][sourceCol];
-                            if (targetRow > 0) {
-                                if (targetMap[targetRow - 1][targetCol][sourceUp] != 0.0) {
-                                    match += 1;
+                        let match = true;
+                        for (let i = -1; i <= 1; i++) {
+                            for (let j = -1; j <= 1; j++) {
+                                if (i == 0 && j == 0) {
+                                    continue;
                                 }
-                            } else {
-                                match += 1;
+                                let k = targetRow + i;
+                                let l = targetCol + j;
+                                let m = sourceRow + i;
+                                let n = sourceRow + j;
+                                if (k >= 0 && k < (this.constants.targetMapRows as number)) {
+                                    if (l >= 0 && l < (this.constants.targetMapColumns as number)) {
+                                        let tile = sourceMap[m][n];
+                                        if (targetMap[k][l][tile] == 0) {
+                                            match = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!match) {
+                                break;
                             }
                         }
-                        if (sourceRow < (this.constants.sourceMapRows as number) - 1) {
-                            let sourceDown = sourceMap[sourceRow + 1][sourceCol];
-                            if (targetRow < (this.constants.targetMapRows as number) - 1) {
-                                if (targetMap[targetRow + 1][targetCol][sourceDown] != 0.0) {
-                                    match += 1;
-                                }
-                            } else {
-                                match += 1;
-                            }
-                        }
-                        if (sourceCol > 0) {
-                            let sourceLeft = sourceMap[sourceRow][sourceCol - 1];
-                            if (targetCol > 0) {
-                                if (targetMap[targetRow][targetCol - 1][sourceLeft] != 0.0) {
-                                    match += 1;
-                                }
-                            } else {
-                                match += 1;
-                            }
-                        }
-                        if (sourceCol < (this.constants.sourceMapCols as number) - 1) {
-                            let sourceRight = sourceMap[sourceRow][sourceCol + 1];
-                            if (targetCol < (this.constants.targetMapColumns as number) - 1) {
-                                if (targetMap[targetRow][targetCol + 1][sourceRight] != 0.0) {
-                                    match += 1;
-                                }
-                            } else {
-                                match += 1;
-                            }
-                        }
-                        if (match == 4) {
+                        if (match) {
                             result += 1.0;
                         }
                     }
@@ -66,7 +51,9 @@ export function makePropergateFn(sourceMapRows: number, sourceMapCols: number, t
             }
         }
         return result;
-    }, {
+    };
+    /*
+    const propergate = gpu.createKernel(impl, {
         output: [numUniqueTiles, targetMapColumns, targetMapRows],
         constants: {
             sourceMapRows,
@@ -77,6 +64,39 @@ export function makePropergateFn(sourceMapRows: number, sourceMapCols: number, t
         },
     });
     return (sourceMap: number[][], targetMap: number[][][]) => propergate(sourceMap, targetMap) as number[][][];
+    */
+    return (sourceMap: number[][], targetMap: number[][][]) => {
+        let result: number[][][] = [];
+        let context = {
+            thread: {
+                x: 0,
+                y: 0,
+                z: 0,
+            },
+            constants: {
+                sourceMapRows,
+                sourceMapCols,
+                targetMapRows,
+                targetMapColumns,
+                numUniqueTiles,
+            },
+        };
+        for (let i = 0; i < targetMapRows; i++) {
+            let row: number[][] = [];
+            context.thread.z = i;
+            for (let j = 0; j < targetMapColumns; j++) {
+                let col: number[] = [];
+                context.thread.y = j;
+                for (let k = 0; k < numUniqueTiles; k++) {
+                    context.thread.x = k;
+                    col.push(impl.call(context, sourceMap, targetMap));
+                }
+                row.push(col);
+            }
+            result.push(row);
+        }
+        return result;
+    };
 }
 
 real_main_with_make_propergate_fn(makePropergateFn);
